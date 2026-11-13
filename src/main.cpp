@@ -96,6 +96,7 @@ static uint32_t alertUntil=0; static uint8_t alertCat=0;
 static uint32_t trkAlarmUntil=0;
 
 static bool soundOn=true, colorBGR=false;
+static bool invertOn=true;      // this CYD panel needs inversion ON for a black background
 static uint8_t brightness=230;
 Preferences prefs;
 
