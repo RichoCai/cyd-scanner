@@ -548,7 +548,7 @@ static void appSaved(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v5.0  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
+  px("v5.1  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
   px("BLE + Wi-Fi recon (sends",160,164,C_MUTED,1,MC_DATUM);
   px("random MAC). Stealth=silent.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
@@ -706,7 +706,7 @@ void setup(){
   bleScan->setActiveScan(!stealth); bleScan->setInterval(160); bleScan->setWindow(80);   // active unless stealth
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 5.0 up");
+  Serial.println("PHANTOM 5.1 up");
 }
 
 void loop(){
@@ -745,7 +745,7 @@ void loop(){
   }
 
   bool anim=(view==V_TRACK||view==V_SCANNER||view==V_HUNT);
-  uint32_t every=bandH?(gDown?33:(anim?70:150)):400;
+  uint32_t every=bandH?(gDown?40:(anim?130:220)):400;   // slower animated redraw -> lower power spike (less backlight sag)
   if(!lastDraw||now-lastDraw>=every||tapX>=0){lastDraw=now;render(now);}
 
   if(!bleScan->isScanning())bleScan->start(0,nullptr,false);
