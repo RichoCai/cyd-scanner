@@ -19,17 +19,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install PlatformIO + esptool
         run: pip install platformio esptool
-
       - name: Build both board versions
         run: pio run -e cyd -e cyd2usb
-
       - name: Merge each build into one flashable image
         run: |
           BOOT_APP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -n1)
@@ -43,14 +39,12 @@ jobs:
               0xe000  "$BOOT_APP0" \
               0x10000 $B/firmware.bin
           }
-          merge cyd     cyd-scanner-1usb.bin
-          merge cyd2usb cyd-scanner-2usb.bin
+          merge cyd     phantom-1usb.bin
+          merge cyd2usb phantom-2usb.bin
           ls -la web/firmware
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web
-
   deploy:
     needs: build
     runs-on: ubuntu-latest
