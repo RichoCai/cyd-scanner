@@ -369,35 +369,57 @@ static void drawHome(uint32_t now){
 //  App: Defense
 // ======================================================================
 static void appDefense(uint32_t now){
-  int nearby=0,trail=0;
+  static Dev t[MAX_DEV]; int tn=0,trail=0;
   portENTER_CRITICAL(&mux);
-  for(int i=0;i<devCount;i++) if(dev[i].tracker&&now-dev[i].lastSeen<60000){ nearby++; if(isTrail(dev[i],now))trail++; }
+  for(int i=0;i<devCount;i++) if(dev[i].tracker&&now-dev[i].lastSeen<60000){ t[tn++]=dev[i]; if(isTrail(dev[i],now))trail++; }
   portEXIT_CRITICAL(&mux);
+  for(int i=0;i<tn;i++)for(int j=i+1;j<tn;j++)if(t[j].rssi>t[i].rssi){Dev x=t[i];t[i]=t[j];t[j]=x;}
   bool threat=trail>0;
-  G->fillRoundRect(8,Y(32),304,30,7,C_PANEL);
-  G->drawRoundRect(8,Y(32),304,30,7,threat?C_RED:C_PURP);
-  px(threat?"THREAT":"SECURE",16,47,threat?C_RED:C_PURP,2,ML_DATUM);
-  char s[20]; snprintf(s,sizeof(s),"%d TRAILING",trail);
-  px(s,304,47,threat?C_RED:C_MUTED,1,MR_DATUM);
-  radar(160,130,60,now,1,-1);
-  char n[32]; snprintf(n,sizeof(n),"%d FIND MY NEARBY",nearby);
-  px(n,160,202,C_PURP,1,MC_DATUM);
-  px("includes phones + airpods",160,216,C_DIM,1,MC_DATUM);
+  G->fillRoundRect(8,Y(30),304,28,7,C_PANEL); G->drawRoundRect(8,Y(30),304,28,7,threat?C_RED:C_PURP);
+  px(threat?"THREAT":"SECURE",16,44,threat?C_RED:C_PURP,2,ML_DATUM);
+  char s[20]; snprintf(s,sizeof(s),"%d TRAILING",trail); px(s,304,44,threat?C_RED:C_MUTED,1,MR_DATUM);
+  // radar left
+  radar(72,140,46,now,1,-1);
+  char n[16]; snprintf(n,sizeof(n),"%d FIND MY",tn); px(n,72,196,C_PURP,1,MC_DATUM);
+  px("incl phones",72,208,C_DIM,1,MC_DATUM);
+  // tracker list right
+  const int lx=130;
+  if(!tn){ px("no trackers nearby",lx+92,138,C_MUTED,1,MC_DATUM); return; }
+  int rows=tn<4?tn:4;
+  for(int k=0;k<rows;k++){ Dev&d=t[k]; int y=66+k*36; bool fol=isTrail(d,now); uint16_t cc=fol?C_RED:C_PURP;
+    G->fillRoundRect(lx,Y(y),182,32,6,fol?0x3000:C_PANEL); if(fol)G->drawRoundRect(lx,Y(y),182,32,6,C_RED);
+    G->fillRect(lx,Y(y),3,32,cc);
+    px(TRK_NAME[d.tracker],lx+8,y+5,fol?C_RED:C_TXT,1,TL_DATUM);
+    if(fol)px("TRAILING",lx+174,y+5,C_RED,1,TR_DATUM);
+    uint32_t dur=(now-d.firstSeen)/1000; char du[16];
+    if(dur<60)snprintf(du,sizeof(du),"%lus near",(unsigned long)dur); else snprintf(du,sizeof(du),"%lum near",(unsigned long)(dur/60));
+    px(du,lx+8,y+19,C_MUTED,1,TL_DATUM);
+    bars(lx+152,y+17,rssiLvl(d.rssi),cc,4,2,12); }
+  if(tn>4){ char m[12];snprintf(m,sizeof(m),"+%d more",tn-4);px(m,lx+90,210,C_DIM,1,MC_DATUM); }
 }
 
 // ======================================================================
-//  App: Scanner (radar + counts)
+//  App: Scanner (radar + counts + detected list)
 // ======================================================================
 static void appScanner(uint32_t now){
-  int cnt[CAT_COUNT]={0};
+  static Dev h[MAX_DEV]; int hn=0; int cnt[CAT_COUNT]={0};
   portENTER_CRITICAL(&mux);
-  for(int i=0;i<devCount;i++) if(dev[i].cat<CAT_COUNT&&now-dev[i].lastSeen<60000)cnt[dev[i].cat]++;
+  for(int i=0;i<devCount;i++) if(dev[i].cat<CAT_COUNT&&now-dev[i].lastSeen<60000){ h[hn++]=dev[i]; cnt[dev[i].cat]++; }
   portEXIT_CRITICAL(&mux);
-  radar(160,126,68,now,-1,1);
-  for(int c=0;c<CAT_COUNT;c++){ int x=6+c*62;
-    G->fillCircle(x+3,Y(220),3,CAT_COL[c]);
-    char s[12]; snprintf(s,sizeof(s),"%s %d",CAT_TILE[c],cnt[c]);
-    px(s,x+10,216,cnt[c]?C_TXT:C_DIM,1,TL_DATUM); }
+  for(int i=0;i<hn;i++)for(int j=i+1;j<hn;j++)if(h[j].rssi>h[i].rssi){Dev x=h[i];h[i]=h[j];h[j]=x;}
+  radar(160,74,42,now,-1,1);
+  for(int c=0;c<CAT_COUNT;c++){ int x=6+c*62; G->fillCircle(x+3,Y(126),3,CAT_COL[c]);
+    char s[12]; snprintf(s,sizeof(s),"%s %d",CAT_TILE[c],cnt[c]); px(s,x+10,122,cnt[c]?C_TXT:C_DIM,1,TL_DATUM); }
+  G->drawFastHLine(8,Y(138),304,C_LINE);
+  if(!hn){ px("no emergency gear detected",160,172,C_MUTED,1,MC_DATUM); return; }
+  int rows=hn<3?hn:3;
+  for(int k=0;k<rows;k++){ Dev&d=h[k]; int y=144+k*23; uint16_t cc=CAT_COL[d.cat];
+    G->fillRect(8,Y(y),3,20,cc);
+    px(CAT_TILE[d.cat],14,y+2,cc,1,TL_DATUM);
+    px(d.name[0]?d.name:"(unnamed)",48,y+2,C_TXT,1,TL_DATUM);
+    char ago[10]; fmtAgo(ago,sizeof(ago),now-d.lastSeen); px(ago,236,y+2,C_MUTED,1,TL_DATUM);
+    bars(282,y+2,rssiLvl(d.rssi),cc,5,3,16); }
+  if(hn>3){ char m[16]; snprintf(m,sizeof(m),"+%d more",hn-3); px(m,160,214,C_DIM,1,MC_DATUM); }
 }
 
 // ======================================================================
@@ -438,11 +460,13 @@ static void appBt(uint32_t now){
   if(!dn){ px("SCANNING BLUETOOTH...",160,120,C_MUTED,1,MC_DATUM); return; }
   const int top=32,rowH=30, perPage=(214-top)/rowH; int start=pager(dn,perPage);
   for(int k=0;k<perPage;k++){ int i=start+k; if(i>=dn)break; Dev&d=ds[i]; int y=top+k*rowH;
-    G->fillRect(8,Y(y),3,rowH-5,d.tracker?C_PURP:C_PURP2);
+    uint16_t fc=d.tracker?C_PURP:(d.cat<CAT_COUNT?CAT_COL[d.cat]:C_PURP2);
+    G->fillRect(8,Y(y),3,rowH-5,fc);
     px(d.name[0]?d.name:"(no name)",16,y,d.name[0]?C_TXT:C_MUTED,1,TL_DATUM);
     px(d.mac,16,y+11,C_MUTED,1,TL_DATUM);
-    if(d.tracker)px(TRK_NAME[d.tracker],276,y+11,C_PURP,1,TR_DATUM);
-    bars(276,y+2,rssiLvl(d.rssi),d.tracker?C_PURP:C_PURP2,5,3,16); }
+    if(d.tracker)px(TRK_NAME[d.tracker],300,y+11,C_PURP,1,TR_DATUM);
+    else if(d.cat<CAT_COUNT)px(CAT_TILE[d.cat],300,y+11,CAT_COL[d.cat],1,TR_DATUM);
+    bars(276,y+1,rssiLvl(d.rssi),fc,5,3,15); }
 }
 
 // ======================================================================
@@ -518,7 +542,7 @@ static void appSaved(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v4.7  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
+  px("v4.8  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
   px("BLE + Wi-Fi recon (sends",160,164,C_MUTED,1,MC_DATUM);
   px("random MAC). Stealth=silent.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
@@ -619,7 +643,7 @@ void setup(){
   bleScan->setActiveScan(!stealth); bleScan->setInterval(160); bleScan->setWindow(80);   // active unless stealth
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 4.7 up");
+  Serial.println("PHANTOM 4.8 up");
 }
 
 void loop(){
