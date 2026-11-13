@@ -476,7 +476,7 @@ static void appSettings(uint32_t now){
   if(tapIn(x,y,w,40)){portENTER_CRITICAL(&mux);devCount=0;portEXIT_CRITICAL(&mux);beepTap();}
   y+=50;
   G->fillRoundRect(x,Y(y),w,44,8,C_PANEL);
-  tt("PHANTOM v3.6  -  receive only",x+14,y+15,C_MUTED,1,TL_DATUM);
+  tt("PHANTOM v3.7  -  receive only",x+14,y+15,C_MUTED,1,TL_DATUM);
   tt("No deauth / jam / spam. Passive RX.",x+14,y+30,C_MUTED,1,TL_DATUM);
 }
 
@@ -491,9 +491,13 @@ static void drawView(uint32_t now){
     if(tapIn(0,0,56,30)){view=V_HOME;beepTap();} }
 }
 static void render(uint32_t now){
-  if(bandH){G=&spr; for(int y0=0;y0<240;y0+=bandH){OY=-y0;spr.fillSprite(C_BG);drawView(now);spr.pushSprite(0,y0);} }
-  else{G=&tft;OY=0;tft.fillScreen(C_BG);drawView(now);}
-  tapX=tapY=-1;
+  // A tap must be handled on the FIRST band only. The screen draws in several
+  // horizontal bands, each calling drawView(); clearing the tap after the first
+  // band stops a single tap from firing once per band (which flipped toggles
+  // an even number of times and looked like nothing happened).
+  if(bandH){ G=&spr;
+    for(int y0=0;y0<240;y0+=bandH){ OY=-y0; spr.fillSprite(C_BG); drawView(now); spr.pushSprite(0,y0); tapX=tapY=-1; }
+  } else { G=&tft; OY=0; tft.fillScreen(C_BG); drawView(now); tapX=tapY=-1; }
 }
 static void splash(){
   tft.fillScreen(C_BG); tft.setTextDatum(MC_DATUM); tft.setTextColor(ACC);
