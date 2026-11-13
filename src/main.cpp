@@ -123,6 +123,7 @@ static uint32_t trkAlarmUntil=0;
 
 static bool soundOn=true, colorBGR=false;
 static bool invertOn=true;      // this CYD panel needs inversion ON for a black background
+static bool stealth=false;      // ON = passive (transmit nothing, untraceable); OFF = active scan w/ random MAC
 static uint8_t brightness=230;
 Preferences prefs;
 
@@ -188,12 +189,20 @@ class BleCB : public NimBLEAdvertisedDeviceCallbacks {
     std::string mac=d->getAddress().toString(); std::string nm=d->haveName()?d->getName():"";
     observe('B',mac.c_str(),nm.c_str(),d->getRSSI(),0,0,classifyTracker(d)); }
 };
-static void wifiScanStep(){ static uint32_t st=0; int n=WiFi.scanComplete();
-  if(n>=0){ lastWifiMs=millis();
+// Replace the factory MAC with a random locally-administered one, so probe/scan
+// requests never carry the hardware's real identity. Rotated periodically for
+// unlinkability across time.
+static void randomizeMac(){ uint8_t m[6]; for(int i=0;i<6;i++)m[i]=esp_random()&0xFF;
+  m[0]=(m[0]&0xFE)|0x02; esp_wifi_set_mac(WIFI_IF_STA,m); }
+static void wifiScanStep(){ static uint32_t st=0, lastMac=0; int n=WiFi.scanComplete();
+  uint32_t now=millis();
+  if(now-lastMac>180000){ lastMac=now; randomizeMac(); }           // new random identity every 3 min
+  if(n>=0){ lastWifiMs=now;
     for(int i=0;i<n;i++) observe('W',WiFi.BSSIDstr(i).c_str(),WiFi.SSID(i).c_str(),WiFi.RSSI(i),
       WiFi.channel(i),WiFi.encryptionType(i)==WIFI_AUTH_OPEN?0:1,0);
     WiFi.scanDelete(); st=0;
-  } else if(n==WIFI_SCAN_FAILED&&millis()-st>5000){ st=millis(); WiFi.scanNetworks(true,true,false,120); }  // active scan
+  } else if(n==WIFI_SCAN_FAILED&&now-st>5000){ st=now;
+    WiFi.scanNetworks(true,true,stealth,stealth?120:120); }        // stealth=true -> passive (sends nothing)
 }
 static void IRAM_ATTR promiscCB(void*buf,wifi_promiscuous_pkt_type_t type){
   if(type!=WIFI_PKT_MGMT)return; const wifi_promiscuous_pkt_t*p=(wifi_promiscuous_pkt_t*)buf;
@@ -446,20 +455,26 @@ static void pill(int x,int w,int y,int rh,bool on){ int pw=40,ph=18,px0=x+w-pw-1
 static bool pillTap(int x,int w,int y,int rh){ return tapIn(x+w-60,y,56,rh); }
 
 static void appSettings(uint32_t now){
-  const int x=8,w=304,rh=30; int y=32;
+  const int x=8,w=304,rh=26; int y=30;
   // COLOUR (RGB/BGR)
   rowBox(x,w,y,rh); px("COLOUR",x+12,y+rh/2,C_TXT,1,ML_DATUM);
   for(int i=0;i<2;i++){bool on=(i==1)==colorBGR;int bx=x+w-104+i*50;
-    G->fillRoundRect(bx,Y(y+5),46,rh-10,4,on?C_PURP:C_LINE);
+    G->fillRoundRect(bx,Y(y+4),46,rh-8,4,on?C_PURP:C_LINE);
     px(i?"BGR":"RGB",bx+23,y+rh/2,on?C_BG:C_MUTED,1,MC_DATUM);
-    if(tapIn(bx,y+2,48,rh-2)){colorBGR=i;applyColorOrder();settingsDirty=true;beepTap();}}
+    if(tapIn(bx,y+1,48,rh-1)){colorBGR=i;applyColorOrder();settingsDirty=true;beepTap();}}
+  y+=rh+4;
+  // STEALTH (passive, sends nothing)
+  rowBox(x,w,y,rh); px("STEALTH",x+12,y+rh/2-3,C_TXT,1,ML_DATUM);
+  px(stealth?"silent / untraceable":"active scan + rand MAC",x+12,y+rh/2+6,C_MUTED,1,ML_DATUM);
+  pill(x,w,y,rh,stealth);
+  if(pillTap(x,w,y,rh)){ stealth=!stealth; bleScan->setActiveScan(!stealth); bleScan->stop(); bleScan->start(0,nullptr,false); settingsDirty=true; beepTap(); }
   y+=rh+4;
   // INVERT
   rowBox(x,w,y,rh); px("INVERT",x+12,y+rh/2,C_TXT,1,ML_DATUM); pill(x,w,y,rh,invertOn);
   if(pillTap(x,w,y,rh)){invertOn=!invertOn;tft.invertDisplay(invertOn);settingsDirty=true;beepTap();}
   y+=rh+4;
   // BRIGHTNESS (drag)
-  rowBox(x,w,y,rh+4); px("BRIGHT",x+12,y+10,C_TXT,1,ML_DATUM);
+  rowBox(x,w,y,rh+4); px("BRIGHT",x+12,y+9,C_TXT,1,ML_DATUM);
   int bx=x+70,bw=w-84,by=y+(rh+4)/2;
   G->fillRoundRect(bx,Y(by-2),bw,5,2,C_LINE);
   if(gDown&&gX>=bx-12&&gX<=bx+bw+12&&gY>=y&&gY<=y+rh+6){brightness=constrain((int)map(gX,bx,bx+bw,25,255),25,255);setBright(brightness);settingsDirty=true;}
@@ -503,9 +518,9 @@ static void appSaved(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v4.5  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
+  px("v4.6  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
   px("BLE + Wi-Fi recon (sends",160,164,C_MUTED,1,MC_DATUM);
-  px("scan requests). No attacks.",160,180,C_MUTED,1,MC_DATUM);
+  px("random MAC). Stealth=silent.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
 }
 
@@ -540,10 +555,11 @@ static void splash(){
 // ======================================================================
 static void loadSettings(){ prefs.begin("phantom",true);
   soundOn=prefs.getBool("snd",true); brightness=prefs.getUChar("brt",230);
-  colorBGR=prefs.getBool("bgr",false); invertOn=prefs.getBool("inv",true); prefs.end(); }
+  colorBGR=prefs.getBool("bgr",false); invertOn=prefs.getBool("inv",true);
+  stealth=prefs.getBool("stl",false); prefs.end(); }
 static void saveSettings(){ prefs.begin("phantom",false);
   prefs.putBool("snd",soundOn); prefs.putUChar("brt",brightness);
-  prefs.putBool("bgr",colorBGR); prefs.putBool("inv",invertOn); prefs.end(); }
+  prefs.putBool("bgr",colorBGR); prefs.putBool("inv",invertOn); prefs.putBool("stl",stealth); prefs.end(); }
 
 static void loadSaved(){ prefs.begin("log",true);
   savedCount=prefs.getUChar("n",0); if(savedCount>MAX_SAVED)savedCount=MAX_SAVED;
@@ -593,14 +609,16 @@ void setup(){
   for(int h:{120,80,60,48,40}) if(spr.createSprite(320,h)){bandH=h;break;}
 
   WiFi.mode(WIFI_STA); WiFi.disconnect();
+  randomizeMac();                                   // never emit the real factory MAC
   esp_wifi_set_promiscuous(true); esp_wifi_set_promiscuous_rx_cb(&promiscCB);
   NimBLEDevice::init("");
+  NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM, true);   // non-resolvable private BLE address
   bleScan=NimBLEDevice::getScan();
   bleScan->setAdvertisedDeviceCallbacks(new BleCB(),true);
-  bleScan->setActiveScan(true); bleScan->setInterval(160); bleScan->setWindow(80);   // active scan: devices reply with their names
+  bleScan->setActiveScan(!stealth); bleScan->setInterval(160); bleScan->setWindow(80);   // active unless stealth
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 4.5 up");
+  Serial.println("PHANTOM 4.6 up");
 }
 
 void loop(){
