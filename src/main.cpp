@@ -214,16 +214,26 @@ static void radar(int cx,int cy,int R,uint32_t now,int filterTrk,int filterCat){
     G->fillCircle(bx,Y(by),nr?3:2,bc); if(nr)G->drawCircle(bx,Y(by),5,bc); }
   G->fillCircle(cx,Y(cy),2,C_PURP);
 }
+// top-facing arc for the Wi-Fi glyph
+static void iarc(int cx,int cy,int r,uint16_t c){
+  for(float a=-2.45f;a<=-0.69f;a+=0.07f){ int x=cx+(int)(cosf(a)*r), yv=cy+(int)(sinf(a)*r);
+    G->drawPixel(x,Y(yv),c); G->drawPixel(x,Y(yv)+1,c); }
+}
+// All icons apply Y() so they land in the correct render band.
 static void icon(char k,int cx,int cy,uint16_t c){
   switch(k){
-    case 'D': drawGhost(cx,cy-11,9,8,c); break;
-    case 'S': G->drawCircle(cx,cy,12,c);G->drawCircle(cx,cy,6,c);G->drawLine(cx,cy,cx+9,cy-8,c);G->fillCircle(cx,cy,2,c); break;
-    case 'W': for(int r=14;r>=5;r-=5){G->drawCircle(cx,cy+7,r,c);G->drawCircle(cx,cy+7,r-1,c);} G->fillRect(cx-16,cy+8,33,12,C_BG); G->fillCircle(cx,cy+7,2,c); break;
-    case 'B': G->drawLine(cx,cy-12,cx,cy+12,c);G->drawLine(cx,cy-12,cx+8,cy-4,c);G->drawLine(cx+8,cy-4,cx,cy+4,c);
-              G->drawLine(cx,cy+12,cx+8,cy+4,c);G->drawLine(cx+8,cy+4,cx,cy-4,c);G->drawLine(cx-7,cy-4,cx+8,cy+4,c);G->drawLine(cx-7,cy+4,cx+8,cy-4,c); break;
-    case 'G': G->drawCircle(cx,cy,9,c);G->drawCircle(cx,cy,10,c);G->fillCircle(cx,cy,3,c);
-              for(int i=0;i<8;i++){float a=i*PI/4;G->drawLine(cx+cosf(a)*9,cy+sinf(a)*9,cx+cosf(a)*13,cy+sinf(a)*13,c);} break;
-    case 'i': G->drawCircle(cx,cy,12,c);G->drawCircle(cx,cy,11,c); px("i",cx,cy-1,c,2,MC_DATUM); break;
+    case 'D': drawGhost(cx,cy-11,9,8,c); break;                                            // ghost (uses Y internally)
+    case 'S': G->drawCircle(cx,Y(cy),12,c);G->drawCircle(cx,Y(cy),6,c);
+              G->drawLine(cx,Y(cy),cx+9,Y(cy-8),c);G->fillCircle(cx,Y(cy),2,c); break;     // radar
+    case 'W': iarc(cx,cy+7,13,c);iarc(cx,cy+7,9,c);iarc(cx,cy+7,5,c);G->fillCircle(cx,Y(cy+7),2,c); break; // wifi arcs
+    case 'B': { int t=cy-11,b=cy+11,q1=cy-5,q3=cy+5,w=7,lx=cx-6;                            // bluetooth rune
+              G->drawLine(cx,Y(t),cx,Y(b),c);
+              G->drawLine(cx,Y(t),cx+w,Y(q1),c);G->drawLine(cx+w,Y(q1),cx,Y(cy),c);
+              G->drawLine(cx,Y(cy),cx+w,Y(q3),c);G->drawLine(cx+w,Y(q3),cx,Y(b),c);
+              G->drawLine(lx,Y(q1),cx+w,Y(q3),c);G->drawLine(lx,Y(q3),cx+w,Y(q1),c); } break;
+    case 'G': G->drawCircle(cx,Y(cy),8,c);G->fillCircle(cx,Y(cy),3,c);                      // gear
+              for(int i=0;i<8;i++){float a=i*PI/4;G->drawLine(cx+(int)(cosf(a)*8),Y(cy)+(int)(sinf(a)*8),cx+(int)(cosf(a)*12),Y(cy)+(int)(sinf(a)*12),c);} break;
+    case 'i': G->drawCircle(cx,Y(cy),11,c); px("i",cx,cy-1,c,2,MC_DATUM); break;            // about
   }
 }
 
@@ -393,6 +403,14 @@ static void appSettings(uint32_t now){
     px(i?"BGR":"RGB",bx+25,y+21,on?C_BG:C_MUTED,1,MC_DATUM);
     if(tapIn(bx,y+8,52,28)){colorBGR=i;applyColorOrder();settingsDirty=true;beepTap();} }
   y+=52;
+  // invert (background white? flip this)
+  G->fillRoundRect(x,Y(y),w,40,7,C_PANEL);
+  px("INVERT",x+12,y+14,C_TXT,1,ML_DATUM);
+  px("Background white? Flip.",x+12,y+27,C_MUTED,1,ML_DATUM);
+  G->fillRoundRect(x+w-64,Y(y+9),50,22,11,invertOn?C_PURP:C_LINE);
+  G->fillCircle(invertOn?x+w-26:x+w-50,Y(y+20),8,C_BG);
+  if(tapIn(x+w-64,y+6,56,28)){invertOn=!invertOn;tft.invertDisplay(invertOn);settingsDirty=true;beepTap();}
+  y+=50;
   // brightness (drag)
   G->fillRoundRect(x,Y(y),w,44,7,C_PANEL);
   px("BRIGHTNESS",x+12,y+13,C_TXT,1,ML_DATUM);
@@ -421,7 +439,7 @@ static void appSettings(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v4.0  -  RECEIVE ONLY",160,140,C_MUTED,1,MC_DATUM);
+  px("v4.2  -  RECEIVE ONLY",160,140,C_MUTED,1,MC_DATUM);
   px("Passive BLE + Wi-Fi recon.",160,164,C_MUTED,1,MC_DATUM);
   px("No deauth / jam / spam.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
@@ -449,8 +467,8 @@ static void drawGhostArt(int x0,int y0){
 }
 static void splash(){
   G=&tft; OY=0; tft.fillScreen(C_BG);
-  drawGhostArt((320-GHOST_W)/2, -8);
-  px("PHANTOM",160,228,C_PURP,3,MC_DATUM);
+  drawGhostArt((320-GHOST_W)/2, -18);
+  px("PHANTOM",160,222,C_PURP,3,MC_DATUM);
 }
 
 // ======================================================================
@@ -458,10 +476,10 @@ static void splash(){
 // ======================================================================
 static void loadSettings(){ prefs.begin("phantom",true);
   soundOn=prefs.getBool("snd",true); brightness=prefs.getUChar("brt",230);
-  colorBGR=prefs.getBool("bgr",false); prefs.end(); }
+  colorBGR=prefs.getBool("bgr",false); invertOn=prefs.getBool("inv",true); prefs.end(); }
 static void saveSettings(){ prefs.begin("phantom",false);
   prefs.putBool("snd",soundOn); prefs.putUChar("brt",brightness);
-  prefs.putBool("bgr",colorBGR); prefs.end(); }
+  prefs.putBool("bgr",colorBGR); prefs.putBool("inv",invertOn); prefs.end(); }
 
 // ======================================================================
 //  Setup / loop
@@ -475,7 +493,7 @@ void setup(){
   loadSettings(); setBright(brightness);
 
   tft.init(); tft.setRotation(1);
-  tft.invertDisplay(false);          // always non-inverted -> background stays pure black
+  tft.invertDisplay(invertOn);        // this panel needs inversion ON for a black background
   applyColorOrder();
   tsSPI.begin(T_CLK,T_MISO,T_MOSI,T_CS); ts.begin(tsSPI); ts.setRotation(1);
   splash();
@@ -490,7 +508,7 @@ void setup(){
   bleScan->setActiveScan(false); bleScan->setInterval(160); bleScan->setWindow(80);
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 4.0 up");
+  Serial.println("PHANTOM 4.2 up");
 }
 
 void loop(){
