@@ -518,7 +518,7 @@ static void appSaved(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v4.6  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
+  px("v4.7  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
   px("BLE + Wi-Fi recon (sends",160,164,C_MUTED,1,MC_DATUM);
   px("random MAC). Stealth=silent.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
@@ -597,12 +597,13 @@ void setup(){
   pinMode(LED_R,OUTPUT);pinMode(LED_G,OUTPUT);pinMode(LED_B,OUTPUT);pinMode(BTN_BOOT,INPUT_PULLUP);
   setLed(false,false,false);
   ledcSetup(0,2000,8);ledcAttachPin(SPEAKER,0);
-  ledcSetup(1,5000,8);ledcAttachPin(TFT_BL,1);
-  loadSettings(); loadSaved(); setBright(brightness);
+  loadSettings(); loadSaved();
 
   tft.init(); tft.setRotation(1);
   tft.invertDisplay(invertOn);        // this panel needs inversion ON for a black background
   applyColorOrder();
+  // attach backlight PWM AFTER tft.init() so TFT_eSPI doesn't reclaim the BL pin as a plain output
+  ledcSetup(1,5000,8); ledcAttachPin(TFT_BL,1); setBright(brightness);
   tsSPI.begin(T_CLK,T_MISO,T_MOSI,T_CS); ts.begin(tsSPI); ts.setRotation(1);
   splash();
   spr.setColorDepth(16);
@@ -618,7 +619,7 @@ void setup(){
   bleScan->setActiveScan(!stealth); bleScan->setInterval(160); bleScan->setWindow(80);   // active unless stealth
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 4.6 up");
+  Serial.println("PHANTOM 4.7 up");
 }
 
 void loop(){
