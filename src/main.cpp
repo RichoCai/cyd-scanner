@@ -70,18 +70,18 @@ static const char *CAT_TILE[CAT_COUNT] = {"Police","Ambulance","Fire","Vehicle"}
 // ======================================================================
 //  Palette
 // ======================================================================
-#define C_BG     0x08A2
-#define C_PANEL  0x10A2
-#define C_PANEL2 0x2124
-#define C_LINE   0x2965
+#define C_BG     0x0041   // #04060a near-black, matches web flasher
+#define C_PANEL  0x0882   // #0a0f14
+#define C_PANEL2 0x10E3
+#define C_LINE   0x1926   // #1b2630
 #define C_TXT    0xFFFF
-#define C_MUTED  0x8430
+#define C_MUTED  0x6C92
 #define C_DIM    0x4228
 #define C_RED    0xF9A6
 #define C_AMBER  0xFD40
-#define C_GREENOK 0x366A
+#define C_GREENOK 0x1FF4
 static const uint16_t CAT_COL[CAT_COUNT] = {0x4D9F,0xFFFF,0xFC00,0xFEA0};
-static const uint16_t ACCENTS[]   = {0x2FEB,0x05FF,0xF81F,0xFD40,0xFB56};
+static const uint16_t ACCENTS[]   = {0x1FF4,0x05FF,0xF81F,0xFD40,0xFB56};  // neon green #1dfca0 first
 static const char *ACCENT_NAME[]  = {"Phantom Green","Ice Cyan","Magenta","Amber","Coral"};
 static uint8_t accentIdx = 0;
 #define ACC (ACCENTS[accentIdx])
@@ -108,6 +108,11 @@ static uint32_t trkAlarmUntil=0;            // tracker-follow alarm
 
 // settings (persisted)
 static bool soundOn=true, colorBGR=false;
+#ifdef CYD_INVERT
+static bool invertOn=true;
+#else
+static bool invertOn=false;
+#endif
 static uint8_t brightness=230;
 Preferences prefs;
 
@@ -133,9 +138,13 @@ static int newSlot(){ if(devCount<MAX_DEV)return devCount++; int s=0;
   for(int i=1;i<MAX_DEV;i++)if(dev[i].lastSeen<dev[s].lastSeen)s=i; return s; }
 
 static uint8_t classifyTracker(NimBLEAdvertisedDevice*d){
+  // Apple "Find My" offline-finding beacon (type 0x12). This is what AirTags
+  // broadcast, but so do AirPods, iPhones and Macs acting as Find My beacons,
+  // so we honestly label it "Find My", not "AirTag". Require the Find My
+  // payload length (0x19) to cut out other Apple adverts (handoff, pairing).
   if(d->haveManufacturerData()){ std::string m=d->getManufacturerData();
-    if(m.size()>=3&&(uint8_t)m[0]==0x4C&&(uint8_t)m[1]==0x00){ uint8_t t=(uint8_t)m[2];
-      if(t==0x12)return T_AIRTAG; if(t==0x07)return T_FINDMY; } }
+    if(m.size()>=4&&(uint8_t)m[0]==0x4C&&(uint8_t)m[1]==0x00
+       &&(uint8_t)m[2]==0x12&&(uint8_t)m[3]==0x19) return T_FINDMY; }
   for(int i=0;i<d->getServiceUUIDCount();i++){ NimBLEUUID u=d->getServiceUUID(i);
     if(u==NimBLEUUID((uint16_t)0xFEED))return T_TILE;
     if(u==NimBLEUUID((uint16_t)0xFD5A)||u==NimBLEUUID((uint16_t)0xFD59))return T_SMARTTAG; }
@@ -427,6 +436,14 @@ static void appSettings(uint32_t now){
     tt(i?"BGR":"RGB",bx+26,y+23,on?C_BG:C_MUTED,2,MC_DATUM);
     if(tapIn(bx,y+10,54,28)){ colorBGR=i; applyColorOrder(); settingsDirty=true; beepTap(); } }
   y+=56;
+  // invert (white background -> turn this ON/OFF)
+  G->fillRoundRect(x,Y(y),w,46,8,C_PANEL);
+  ff("Invert display",x+14,y+15,C_TXT,&FreeSans9pt7b,ML_DATUM);
+  tt("Background white? Flip this.",x+14,y+32,C_MUTED,1,ML_DATUM);
+  G->fillRoundRect(x+w-66,Y(y+12),52,22,11,invertOn?ACC:C_LINE);
+  G->fillCircle(invertOn?x+w-26:x+w-52,Y(y+23),8,C_BG);
+  if(tapIn(x+w-66,y+10,58,28)){ invertOn=!invertOn; tft.invertDisplay(invertOn); settingsDirty=true; beepTap(); }
+  y+=56;
   // brightness (live drag)
   G->fillRoundRect(x,Y(y),w,48,8,C_PANEL);
   ff("Brightness",x+14,y+16,C_TXT,&FreeSans9pt7b,ML_DATUM);
@@ -459,7 +476,7 @@ static void appSettings(uint32_t now){
   if(tapIn(x,y,w,40)){portENTER_CRITICAL(&mux);devCount=0;portEXIT_CRITICAL(&mux);beepTap();}
   y+=50;
   G->fillRoundRect(x,Y(y),w,44,8,C_PANEL);
-  tt("PHANTOM v3.5  -  receive only",x+14,y+15,C_MUTED,1,TL_DATUM);
+  tt("PHANTOM v3.6  -  receive only",x+14,y+15,C_MUTED,1,TL_DATUM);
   tt("No deauth / jam / spam. Passive RX.",x+14,y+30,C_MUTED,1,TL_DATUM);
 }
 
@@ -490,10 +507,11 @@ static void splash(){
 static void loadSettings(){ prefs.begin("phantom",true);
   soundOn=prefs.getBool("snd",true); brightness=prefs.getUChar("brt",230);
   accentIdx=prefs.getUChar("acc",0); if(accentIdx>4)accentIdx=0;
-  colorBGR=prefs.getBool("bgr",false); prefs.end(); }
+  colorBGR=prefs.getBool("bgr",false); invertOn=prefs.getBool("inv",invertOn); prefs.end(); }
 static void saveSettings(){ prefs.begin("phantom",false);
   prefs.putBool("snd",soundOn); prefs.putUChar("brt",brightness);
-  prefs.putUChar("acc",accentIdx); prefs.putBool("bgr",colorBGR); prefs.end(); }
+  prefs.putUChar("acc",accentIdx); prefs.putBool("bgr",colorBGR);
+  prefs.putBool("inv",invertOn); prefs.end(); }
 
 // ======================================================================
 //  Setup / loop
@@ -507,9 +525,7 @@ void setup(){
   loadSettings(); setBright(brightness);
 
   tft.init(); tft.setRotation(1);
-#ifdef CYD_INVERT
-  tft.invertDisplay(true);
-#endif
+  tft.invertDisplay(invertOn);
   applyColorOrder();
   tsSPI.begin(T_CLK,T_MISO,T_MOSI,T_CS); ts.begin(tsSPI); ts.setRotation(1);
   splash();
