@@ -1,8 +1,16 @@
 {
-  "name": "CYD Emergency Scanner",
-  "version": "2.1.0",
+  "name": "PHANTOM",
+  "version": "3.0.0",
   "new_install_prompt_erase": true,
   "builds": [
-    { "chipFamily": "ESP32", "parts": [{ "path": "firmware/cyd-scanner-2usb.bin", "offset": 0 }] }
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "firmware/phantom-2usb.bin",
+          "offset": 0
+        }
+      ]
+    }
   ]
 }
