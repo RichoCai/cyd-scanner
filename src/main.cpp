@@ -135,6 +135,12 @@ static uint8_t classifyTracker(NimBLEAdvertisedDevice*d){
     if(u==NimBLEUUID((uint16_t)0xFD5A)||u==NimBLEUUID((uint16_t)0xFD59))return T_SMARTTAG; }
   return T_NONE;
 }
+// A tracker counts as "trailing you" only if it is CLOSE and has stayed with
+// you a long time. Find My beacons from passing phones/AirPods are detected but
+// won't trip a threat unless they're close (>-70dBm) for 5+ minutes.
+static bool isTrail(const Dev&d,uint32_t now){
+  return d.tracker && now-d.lastSeen<30000 && (now-d.firstSeen)>300000 && d.rssi>-70;
+}
 static void observe(char src,const char*mac,const char*name,int rssi,uint8_t chan,uint8_t enc,uint8_t trk){
   char macL[18]; lowerCopy(macL,mac,sizeof(macL)); uint32_t now=millis();
   const Rule*r=matchRule(src,macL,name); bool isNew=false;
@@ -297,24 +303,29 @@ static const App APPS[]={
   {"DEFENSE",'D',V_TRACK},{"SCANNER",'S',V_SCANNER},{"WI-FI",'W',V_WIFI},
   {"BLUETOOTH",'B',V_BT},{"SETTINGS",'G',V_SET},{"ABOUT",'i',V_ABOUT},
 };
+static const char *APP_SUB[6]={"tracker watch","police radar","rogue & deauth","nearby BLE","colour / light","the rite"};
 static void drawHome(uint32_t now){
-  px("PHANTOM",160,44,C_PURP,3,MC_DATUM);
-  px("COUNTER-SURVEILLANCE",160,70,C_MUTED,1,MC_DATUM);
-  int trk=0,wifi=0,bt=0;
+  int trail=0,wifi=0,bt=0;
   portENTER_CRITICAL(&mux); int dc=devCount;
-  for(int i=0;i<dc;i++){if(now-dev[i].lastSeen>30000)continue;if(dev[i].tracker)trk++;if(dev[i].src=='W')wifi++;else bt++;}
+  for(int i=0;i<dc;i++){ if(now-dev[i].lastSeen>30000)continue;
+    if(dev[i].src=='W')wifi++; else bt++; if(isTrail(dev[i],now))trail++; }
   portEXIT_CRITICAL(&mux);
-  const int gx=10, gy=92, cw=150, ch=42, gap=6;
+  const int gx=8, gy=34, cw=152, ch=64, gap=5;    // big buttons, fill the screen
   for(int i=0;i<6;i++){ int col=i%2,row=i/2;
     int x=gx+col*(cw+gap), y=gy+row*(ch+gap);
     bool tp=tapIn(x,y,cw,ch);
-    G->fillRoundRect(x,Y(y),cw,ch,6,tp?C_PANEL2:C_PANEL);
-    G->fillRoundRect(x,Y(y),3,ch,2,tp?C_PURP:C_PURP2);          // slim accent edge
-    if(tp)G->drawRoundRect(x,Y(y),cw,ch,6,C_PURP);
-    icon(APPS[i].icon,x+24,y+ch/2,C_PURP);
-    px(APPS[i].name,x+46,y+ch/2-8,C_TXT,1,TL_DATUM);
-    int cnt=APPS[i].view==V_TRACK?trk:APPS[i].view==V_WIFI?wifi:APPS[i].view==V_BT?bt:-1;
-    if(cnt>=0){char b[8];snprintf(b,sizeof(b),"%d",cnt);px(b,x+46,y+ch/2+4,cnt&&APPS[i].view==V_TRACK?C_PURP:C_MUTED,1,TL_DATUM);}
+    G->drawRoundRect(x-1,Y(y-1),cw+2,ch+2,8,tp?C_PURP:C_LINE);          // outer halo
+    G->fillRoundRect(x,Y(y),cw,ch,7,tp?C_PANEL2:C_PANEL);
+    G->fillRoundRect(x,Y(y),4,ch,2,C_PURP);                            // accent bar
+    G->drawFastHLine(x+8,Y(y+2),cw-16,C_LINE);                         // top sheen
+    if(tp){ G->drawRoundRect(x,Y(y),cw,ch,7,C_PURP); G->drawRoundRect(x+1,Y(y+1),cw-2,ch-2,6,C_PURP2); }
+    icon(APPS[i].icon,x+28,y+32,C_PURP);
+    px(APPS[i].name,x+52,y+22,C_TXT,1,TL_DATUM);
+    px(APP_SUB[i],x+52,y+36,C_MUTED,1,TL_DATUM);
+    int cnt=APPS[i].view==V_TRACK?trail:APPS[i].view==V_WIFI?wifi:APPS[i].view==V_BT?bt:-1;
+    if(cnt>=0){ char b[8];snprintf(b,sizeof(b),"%d",cnt);
+      px(b,x+cw-12,y+20,(cnt&&APPS[i].view==V_TRACK)?C_RED:C_PURP,2,MR_DATUM); }
+    else px(">",x+cw-12,y+20,C_PURP2,2,MR_DATUM);
     if(tp){view=APPS[i].view;pageIdx[view]=0;beepTap();}
   }
 }
@@ -323,18 +334,20 @@ static void drawHome(uint32_t now){
 //  App: Defense
 // ======================================================================
 static void appDefense(uint32_t now){
-  int tn=0,follow=0;
+  int nearby=0,trail=0;
   portENTER_CRITICAL(&mux);
-  for(int i=0;i<devCount;i++) if(dev[i].tracker&&now-dev[i].lastSeen<60000){tn++; if((now-dev[i].firstSeen)/1000>90)follow++;}
+  for(int i=0;i<devCount;i++) if(dev[i].tracker&&now-dev[i].lastSeen<60000){ nearby++; if(isTrail(dev[i],now))trail++; }
   portEXIT_CRITICAL(&mux);
-  bool threat=follow>0;
+  bool threat=trail>0;
   G->fillRoundRect(8,Y(32),304,30,7,C_PANEL);
   G->drawRoundRect(8,Y(32),304,30,7,threat?C_RED:C_PURP);
   px(threat?"THREAT":"SECURE",16,47,threat?C_RED:C_PURP,2,ML_DATUM);
-  char s[28]; if(threat)snprintf(s,sizeof(s),"%d TRAILING",follow); else snprintf(s,sizeof(s),"%d NEARBY",tn);
-  px(s,304,47,C_MUTED,1,MR_DATUM);
-  radar(160,138,64,now,1,-1);
-  px("AIRTAG / TILE / SMARTTAG",160,214,C_MUTED,1,MC_DATUM);
+  char s[20]; snprintf(s,sizeof(s),"%d TRAILING",trail);
+  px(s,304,47,threat?C_RED:C_MUTED,1,MR_DATUM);
+  radar(160,130,60,now,1,-1);
+  char n[32]; snprintf(n,sizeof(n),"%d FIND MY NEARBY",nearby);
+  px(n,160,202,C_PURP,1,MC_DATUM);
+  px("includes phones + airpods",160,216,C_DIM,1,MC_DATUM);
 }
 
 // ======================================================================
@@ -464,7 +477,7 @@ static void appSaved(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v4.3  -  RECEIVE ONLY",160,140,C_MUTED,1,MC_DATUM);
+  px("v4.4  -  RECEIVE ONLY",160,140,C_MUTED,1,MC_DATUM);
   px("Passive BLE + Wi-Fi recon.",160,164,C_MUTED,1,MC_DATUM);
   px("No deauth / jam / spam.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
@@ -526,7 +539,7 @@ static void autoLog(uint32_t now){
   struct C{char mac[18];char name[20];uint8_t type;char cat;}; static C cand[MAX_DEV]; int cn=0;
   portENTER_CRITICAL(&mux);
   for(int i=0;i<devCount&&cn<MAX_DEV;i++){ Dev&d=dev[i];
-    bool follow=d.tracker&&now-d.lastSeen<60000&&(now-d.firstSeen)>120000;
+    bool follow=isTrail(d,now);
     bool emg=d.cat<CAT_COUNT&&now-d.lastSeen<60000;
     if(follow||emg){ strlcpy(cand[cn].mac,d.mac,18); strlcpy(cand[cn].name,d.name,20);
       cand[cn].type=follow?d.tracker:0; cand[cn].cat=emg?(char)d.cat:(char)255; cn++; } }
@@ -561,7 +574,7 @@ void setup(){
   bleScan->setActiveScan(false); bleScan->setInterval(160); bleScan->setWindow(80);
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 4.3 up");
+  Serial.println("PHANTOM 4.4 up");
 }
 
 void loop(){
@@ -575,7 +588,7 @@ void loop(){
 
   bool follow=false;
   portENTER_CRITICAL(&mux);
-  for(int i=0;i<devCount;i++) if(dev[i].tracker&&now-dev[i].lastSeen<60000&&(now-dev[i].firstSeen)>120000){
+  for(int i=0;i<devCount;i++) if(isTrail(dev[i],now)){
     follow=true; if(!dev[i].alarmed){dev[i].alarmed=true;trkAlarmUntil=now+6000;} }
   portEXIT_CRITICAL(&mux);
   if(now<trkAlarmUntil){ if(!trkAl){trkAl=true;trackerAlarm();} bool p=(now/200)%2; setLed(p,false,p);}
