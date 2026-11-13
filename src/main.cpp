@@ -100,6 +100,13 @@ static bool invertOn=true;      // this CYD panel needs inversion ON for a black
 static uint8_t brightness=230;
 Preferences prefs;
 
+// ---- saved log (internal flash): trackers that trailed you + emergency hits ----
+struct Saved { char mac[18]; char name[20]; uint8_t type; char cat; };  // type=Trk (0=emergency), cat=CAT index or 255
+static const int MAX_SAVED=28;
+static Saved saved[MAX_SAVED]; static int savedCount=0;
+static void loadSaved(); static void persistSaved();
+static void saveEntry(const char*,const char*,uint8_t,char); static void clearSaved(); static void autoLog(uint32_t);
+
 TFT_eSPI tft;
 TFT_eSprite spr(&tft);
 SPIClass tsSPI(VSPI);
@@ -122,7 +129,7 @@ static int newSlot(){ if(devCount<MAX_DEV)return devCount++; int s=0;
   for(int i=1;i<MAX_DEV;i++)if(dev[i].lastSeen<dev[s].lastSeen)s=i; return s; }
 static uint8_t classifyTracker(NimBLEAdvertisedDevice*d){
   if(d->haveManufacturerData()){ std::string m=d->getManufacturerData();
-    if(m.size()>=4&&(uint8_t)m[0]==0x4C&&(uint8_t)m[1]==0x00&&(uint8_t)m[2]==0x12&&(uint8_t)m[3]==0x19) return T_FINDMY; }
+    if(m.size()>=3&&(uint8_t)m[0]==0x4C&&(uint8_t)m[1]==0x00&&(uint8_t)m[2]==0x12) return T_FINDMY; }  // Apple Find My offline-finding (AirTag etc)
   for(int i=0;i<d->getServiceUUIDCount();i++){ NimBLEUUID u=d->getServiceUUID(i);
     if(u==NimBLEUUID((uint16_t)0xFEED))return T_TILE;
     if(u==NimBLEUUID((uint16_t)0xFD5A)||u==NimBLEUUID((uint16_t)0xFD59))return T_SMARTTAG; }
@@ -240,7 +247,7 @@ static void icon(char k,int cx,int cy,uint16_t c){
 // ======================================================================
 //  Touch (tap only)
 // ======================================================================
-enum View { V_HOME, V_TRACK, V_SCANNER, V_WIFI, V_BT, V_SET, V_ABOUT, V_COUNT };
+enum View { V_HOME, V_TRACK, V_SCANNER, V_WIFI, V_BT, V_SET, V_ABOUT, V_SAVED, V_COUNT };
 static uint8_t view=V_HOME;
 static int pageIdx[V_COUNT]={0};
 static bool pressed=false, moved=false; static int pressX,pressY; static uint32_t pressMs;
@@ -264,7 +271,7 @@ static bool tapIn(int x,int y,int w,int h){return tapX>=0&&tapX>=x&&tapX<x+w&&ta
 // ======================================================================
 //  Header, pager, home
 // ======================================================================
-static const char *VNAME[V_COUNT]={"PHANTOM","DEFENSE","SCANNER","WI-FI","BLUETOOTH","SETTINGS","ABOUT"};
+static const char *VNAME[V_COUNT]={"PHANTOM","DEFENSE","SCANNER","WI-FI","BLUETOOTH","SETTINGS","ABOUT","SAVED LOG"};
 static void header(bool back){
   G->drawFastHLine(0,Y(26),320,C_PURP2);
   if(back){ px("<",12,13,C_PURP,2,MC_DATUM); px(VNAME[view],34,13,C_TXT,2,ML_DATUM); }
@@ -297,16 +304,17 @@ static void drawHome(uint32_t now){
   portENTER_CRITICAL(&mux); int dc=devCount;
   for(int i=0;i<dc;i++){if(now-dev[i].lastSeen>30000)continue;if(dev[i].tracker)trk++;if(dev[i].src=='W')wifi++;else bt++;}
   portEXIT_CRITICAL(&mux);
-  const int gx=8, gy=88, cw=152, ch=48, gap=4;
+  const int gx=10, gy=92, cw=150, ch=42, gap=6;
   for(int i=0;i<6;i++){ int col=i%2,row=i/2;
     int x=gx+col*(cw+gap), y=gy+row*(ch+gap);
     bool tp=tapIn(x,y,cw,ch);
-    G->fillRoundRect(x,Y(y),cw,ch,7,tp?C_PANEL2:C_PANEL);
-    G->drawRoundRect(x,Y(y),cw,ch,7,tp?C_PURP:C_LINE);
-    icon(APPS[i].icon,x+26,y+ch/2,C_PURP);
-    px(APPS[i].name,x+50,y+ch/2-8,C_TXT,1,TL_DATUM);
+    G->fillRoundRect(x,Y(y),cw,ch,6,tp?C_PANEL2:C_PANEL);
+    G->fillRoundRect(x,Y(y),3,ch,2,tp?C_PURP:C_PURP2);          // slim accent edge
+    if(tp)G->drawRoundRect(x,Y(y),cw,ch,6,C_PURP);
+    icon(APPS[i].icon,x+24,y+ch/2,C_PURP);
+    px(APPS[i].name,x+46,y+ch/2-8,C_TXT,1,TL_DATUM);
     int cnt=APPS[i].view==V_TRACK?trk:APPS[i].view==V_WIFI?wifi:APPS[i].view==V_BT?bt:-1;
-    if(cnt>=0){char b[8];snprintf(b,sizeof(b),"%d",cnt);px(b,x+50,y+ch/2+4,cnt&&APPS[i].view==V_TRACK?C_PURP:C_MUTED,1,TL_DATUM);}
+    if(cnt>=0){char b[8];snprintf(b,sizeof(b),"%d",cnt);px(b,x+46,y+ch/2+4,cnt&&APPS[i].view==V_TRACK?C_PURP:C_MUTED,1,TL_DATUM);}
     if(tp){view=APPS[i].view;pageIdx[view]=0;beepTap();}
   }
 }
@@ -392,45 +400,62 @@ static void appBt(uint32_t now){
 // ======================================================================
 //  App: Settings
 // ======================================================================
+// slim row helpers
+static void rowBox(int x,int w,int y,int rh){ G->fillRoundRect(x,Y(y),w,rh,5,C_PANEL); }
+static void pill(int x,int w,int y,int rh,bool on){ int pw=40,ph=18,px0=x+w-pw-10,py=y+(rh-ph)/2;
+  G->fillRoundRect(px0,Y(py),pw,ph,ph/2,on?C_PURP:C_LINE); G->fillCircle(on?px0+pw-ph/2:px0+ph/2,Y(py+ph/2),ph/2-2,C_BG); }
+static bool pillTap(int x,int w,int y,int rh){ return tapIn(x+w-60,y,56,rh); }
+
 static void appSettings(uint32_t now){
-  const int x=10,w=300; int y=34;
-  // colour hue (purple vs green => RGB/BGR)
-  G->fillRoundRect(x,Y(y),w,42,7,C_PANEL);
-  px("COLOUR",x+12,y+13,C_TXT,1,ML_DATUM);
-  px("Not purple? Switch.",x+12,y+28,C_MUTED,1,ML_DATUM);
-  for(int i=0;i<2;i++){ bool on=(i==1)==colorBGR; int bx=x+w-116+i*54;
-    G->fillRoundRect(bx,Y(y+10),50,22,5,on?C_PURP:C_LINE);
-    px(i?"BGR":"RGB",bx+25,y+21,on?C_BG:C_MUTED,1,MC_DATUM);
-    if(tapIn(bx,y+8,52,28)){colorBGR=i;applyColorOrder();settingsDirty=true;beepTap();} }
-  y+=52;
-  // invert (background white? flip this)
-  G->fillRoundRect(x,Y(y),w,40,7,C_PANEL);
-  px("INVERT",x+12,y+14,C_TXT,1,ML_DATUM);
-  px("Background white? Flip.",x+12,y+27,C_MUTED,1,ML_DATUM);
-  G->fillRoundRect(x+w-64,Y(y+9),50,22,11,invertOn?C_PURP:C_LINE);
-  G->fillCircle(invertOn?x+w-26:x+w-50,Y(y+20),8,C_BG);
-  if(tapIn(x+w-64,y+6,56,28)){invertOn=!invertOn;tft.invertDisplay(invertOn);settingsDirty=true;beepTap();}
-  y+=50;
-  // brightness (drag)
-  G->fillRoundRect(x,Y(y),w,44,7,C_PANEL);
-  px("BRIGHTNESS",x+12,y+13,C_TXT,1,ML_DATUM);
-  int bx=x+12,bw=w-24,by=y+30;
-  G->fillRoundRect(bx,Y(by),bw,6,3,C_LINE);
-  if(gDown&&gX>=bx-10&&gX<=bx+bw+10&&gY>=y+18&&gY<=y+42){brightness=constrain((int)map(gX,bx,bx+bw,25,255),25,255);setBright(brightness);settingsDirty=true;}
-  int fw=map(brightness,25,255,8,bw); G->fillRoundRect(bx,Y(by),fw,6,3,C_PURP); G->fillCircle(bx+fw,Y(by+3),8,C_PURP);
-  y+=54;
-  // sound
-  G->fillRoundRect(x,Y(y),w,40,7,C_PANEL);
-  px("SOUND",x+12,y+21,C_TXT,1,ML_DATUM);
-  G->fillRoundRect(x+w-64,Y(y+9),50,22,11,soundOn?C_PURP:C_LINE);
-  G->fillCircle(soundOn?x+w-26:x+w-50,Y(y+20),8,C_BG);
-  if(tapIn(x+w-64,y+6,56,28)){soundOn=!soundOn;settingsDirty=true;beepTap();}
-  y+=50;
-  // clear
-  G->fillRoundRect(x,Y(y),w,40,7,C_PANEL);
-  px("CLEAR DETECTIONS",x+12,y+21,C_RED,1,ML_DATUM);
-  px(">",x+w-14,y+21,C_RED,2,MR_DATUM);
-  if(tapIn(x,y,w,40)){portENTER_CRITICAL(&mux);devCount=0;portEXIT_CRITICAL(&mux);beepTap();}
+  const int x=8,w=304,rh=30; int y=32;
+  // COLOUR (RGB/BGR)
+  rowBox(x,w,y,rh); px("COLOUR",x+12,y+rh/2,C_TXT,1,ML_DATUM);
+  for(int i=0;i<2;i++){bool on=(i==1)==colorBGR;int bx=x+w-104+i*50;
+    G->fillRoundRect(bx,Y(y+5),46,rh-10,4,on?C_PURP:C_LINE);
+    px(i?"BGR":"RGB",bx+23,y+rh/2,on?C_BG:C_MUTED,1,MC_DATUM);
+    if(tapIn(bx,y+2,48,rh-2)){colorBGR=i;applyColorOrder();settingsDirty=true;beepTap();}}
+  y+=rh+4;
+  // INVERT
+  rowBox(x,w,y,rh); px("INVERT",x+12,y+rh/2,C_TXT,1,ML_DATUM); pill(x,w,y,rh,invertOn);
+  if(pillTap(x,w,y,rh)){invertOn=!invertOn;tft.invertDisplay(invertOn);settingsDirty=true;beepTap();}
+  y+=rh+4;
+  // BRIGHTNESS (drag)
+  rowBox(x,w,y,rh+4); px("BRIGHT",x+12,y+10,C_TXT,1,ML_DATUM);
+  int bx=x+70,bw=w-84,by=y+(rh+4)/2;
+  G->fillRoundRect(bx,Y(by-2),bw,5,2,C_LINE);
+  if(gDown&&gX>=bx-12&&gX<=bx+bw+12&&gY>=y&&gY<=y+rh+6){brightness=constrain((int)map(gX,bx,bx+bw,25,255),25,255);setBright(brightness);settingsDirty=true;}
+  int fw=map(brightness,25,255,6,bw); G->fillRoundRect(bx,Y(by-2),fw,5,2,C_PURP); G->fillCircle(bx+fw,Y(by),7,C_PURP);
+  y+=rh+8;
+  // SOUND
+  rowBox(x,w,y,rh); px("SOUND",x+12,y+rh/2,C_TXT,1,ML_DATUM); pill(x,w,y,rh,soundOn);
+  if(pillTap(x,w,y,rh)){soundOn=!soundOn;settingsDirty=true;beepTap();}
+  y+=rh+4;
+  // SAVED LOG (nav)
+  rowBox(x,w,y,rh); char s[28]; snprintf(s,sizeof(s),"SAVED LOG  %d",savedCount);
+  px(s,x+12,y+rh/2,C_PURP,1,ML_DATUM); px(">",x+w-14,y+rh/2,C_PURP,2,MR_DATUM);
+  if(tapIn(x,y,w,rh)){view=V_SAVED;pageIdx[V_SAVED]=0;beepTap();}
+  y+=rh+4;
+  // CLEAR live detections
+  rowBox(x,w,y,rh-2); px("CLEAR DETECTIONS",x+12,y+(rh-2)/2,C_RED,1,ML_DATUM); px(">",x+w-14,y+(rh-2)/2,C_RED,2,MR_DATUM);
+  if(tapIn(x,y,w,rh-2)){portENTER_CRITICAL(&mux);devCount=0;portEXIT_CRITICAL(&mux);beepTap();}
+}
+
+// ======================================================================
+//  App: Saved log
+// ======================================================================
+static void appSaved(uint32_t now){
+  // clear button
+  G->fillRoundRect(8,Y(30),304,22,6,C_PANEL); px("CLEAR SAVED LOG",160,41,C_RED,1,MC_DATUM);
+  if(tapIn(8,30,304,22)){clearSaved();beepTap();}
+  if(!savedCount){ px("NOTHING SAVED YET",160,120,C_MUTED,1,MC_DATUM);
+    px("Trailing tags and police hits",160,138,C_DIM,1,MC_DATUM);
+    px("auto-save here.",160,150,C_DIM,1,MC_DATUM); return; }
+  const int top=58,rowH=26; int perPage=(206-top)/rowH; int start=pager(savedCount,perPage);
+  for(int k=0;k<perPage;k++){ int i=start+k; if(i>=savedCount)break; Saved&s=saved[i]; int y=top+k*rowH;
+    bool trk=s.type!=0; uint16_t cc=trk?C_PURP:((uint8_t)s.cat<CAT_COUNT?CAT_COL[(uint8_t)s.cat]:C_MUTED);
+    G->fillRect(8,Y(y),3,rowH-5,cc);
+    const char*tag=trk?TRK_NAME[s.type]:((uint8_t)s.cat<CAT_COUNT?CAT_TILE[(uint8_t)s.cat]:"?");
+    px(tag,16,y,cc,1,TL_DATUM); px(s.name,74,y,C_TXT,1,TL_DATUM); px(s.mac,16,y+11,C_MUTED,1,TL_DATUM); }
 }
 
 // ======================================================================
@@ -439,7 +464,7 @@ static void appSettings(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v4.2  -  RECEIVE ONLY",160,140,C_MUTED,1,MC_DATUM);
+  px("v4.3  -  RECEIVE ONLY",160,140,C_MUTED,1,MC_DATUM);
   px("Passive BLE + Wi-Fi recon.",160,164,C_MUTED,1,MC_DATUM);
   px("No deauth / jam / spam.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
@@ -453,8 +478,8 @@ static void drawView(uint32_t now){
   else { header(true);
     switch(view){ case V_TRACK:appDefense(now);break; case V_SCANNER:appScanner(now);break;
       case V_WIFI:appWifi(now);break; case V_BT:appBt(now);break;
-      case V_SET:appSettings(now);break; case V_ABOUT:appAbout(now);break; }
-    if(tapIn(0,0,52,28)){view=V_HOME;beepTap();} }
+      case V_SET:appSettings(now);break; case V_ABOUT:appAbout(now);break; case V_SAVED:appSaved(now);break; }
+    if(tapIn(0,0,52,28)){ view=(view==V_SAVED)?V_SET:V_HOME; beepTap(); } }
 }
 static void render(uint32_t now){
   if(bandH){ G=&spr;
@@ -467,8 +492,8 @@ static void drawGhostArt(int x0,int y0){
 }
 static void splash(){
   G=&tft; OY=0; tft.fillScreen(C_BG);
-  drawGhostArt((320-GHOST_W)/2, -18);
-  px("PHANTOM",160,222,C_PURP,3,MC_DATUM);
+  drawGhostArt((320-GHOST_W)/2, 4);
+  px("PHANTOM",160,204,C_PURP,3,MC_DATUM);
 }
 
 // ======================================================================
@@ -481,6 +506,34 @@ static void saveSettings(){ prefs.begin("phantom",false);
   prefs.putBool("snd",soundOn); prefs.putUChar("brt",brightness);
   prefs.putBool("bgr",colorBGR); prefs.putBool("inv",invertOn); prefs.end(); }
 
+static void loadSaved(){ prefs.begin("log",true);
+  savedCount=prefs.getUChar("n",0); if(savedCount>MAX_SAVED)savedCount=MAX_SAVED;
+  size_t need=(size_t)savedCount*sizeof(Saved);
+  if(need && prefs.getBytesLength("d")==need) prefs.getBytes("d",saved,need); else savedCount=0;
+  prefs.end(); }
+static void persistSaved(){ prefs.begin("log",false);
+  prefs.putUChar("n",savedCount); prefs.putBytes("d",saved,(size_t)savedCount*sizeof(Saved)); prefs.end(); }
+static void saveEntry(const char*mac,const char*name,uint8_t type,char cat){
+  for(int i=0;i<savedCount;i++) if(!strcmp(saved[i].mac,mac))return;   // dedupe by MAC
+  if(savedCount>=MAX_SAVED)return;
+  Saved&s=saved[savedCount++]; strlcpy(s.mac,mac,sizeof(s.mac));
+  strlcpy(s.name,name[0]?name:"(no name)",sizeof(s.name)); s.type=type; s.cat=cat;
+  persistSaved();
+}
+static void clearSaved(){ savedCount=0; persistSaved(); }
+// Called once per second from loop(): auto-log trailing trackers + emergency hits.
+static void autoLog(uint32_t now){
+  struct C{char mac[18];char name[20];uint8_t type;char cat;}; static C cand[MAX_DEV]; int cn=0;
+  portENTER_CRITICAL(&mux);
+  for(int i=0;i<devCount&&cn<MAX_DEV;i++){ Dev&d=dev[i];
+    bool follow=d.tracker&&now-d.lastSeen<60000&&(now-d.firstSeen)>120000;
+    bool emg=d.cat<CAT_COUNT&&now-d.lastSeen<60000;
+    if(follow||emg){ strlcpy(cand[cn].mac,d.mac,18); strlcpy(cand[cn].name,d.name,20);
+      cand[cn].type=follow?d.tracker:0; cand[cn].cat=emg?(char)d.cat:(char)255; cn++; } }
+  portEXIT_CRITICAL(&mux);
+  for(int i=0;i<cn;i++) saveEntry(cand[i].mac,cand[i].name,cand[i].type,cand[i].cat);  // dedupe inside
+}
+
 // ======================================================================
 //  Setup / loop
 // ======================================================================
@@ -490,7 +543,7 @@ void setup(){
   setLed(false,false,false);
   ledcSetup(0,2000,8);ledcAttachPin(SPEAKER,0);
   ledcSetup(1,5000,8);ledcAttachPin(TFT_BL,1);
-  loadSettings(); setBright(brightness);
+  loadSettings(); loadSaved(); setBright(brightness);
 
   tft.init(); tft.setRotation(1);
   tft.invertDisplay(invertOn);        // this panel needs inversion ON for a black background
@@ -508,7 +561,7 @@ void setup(){
   bleScan->setActiveScan(false); bleScan->setInterval(160); bleScan->setWindow(80);
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 4.2 up");
+  Serial.println("PHANTOM 4.3 up");
 }
 
 void loop(){
@@ -517,7 +570,7 @@ void loop(){
   handleTouch();
 
   if(now-chanHop>250){chanHop=now;ch=ch%13+1;esp_wifi_set_channel(ch,WIFI_SECOND_CHAN_NONE);}
-  if(now-lastWin>1000){lastWin=now;deauthWindow=deauthCount;deauthCount=0;}
+  if(now-lastWin>1000){lastWin=now;deauthWindow=deauthCount;deauthCount=0; autoLog(now);}  // auto-save hits to flash
   wifiScanStep();
 
   bool follow=false;
