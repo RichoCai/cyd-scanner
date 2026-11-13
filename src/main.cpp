@@ -221,7 +221,7 @@ static void alertSound(uint8_t c){switch(c){
   case CAT_FIRE:tone_(900,110);tone_(1500,110);tone_(2100,220);break;
   default:tone_(2000,70);} }
 static void trackerAlarm(){for(int i=0;i<4;i++){tone_(2600,70);tone_(1900,70);}}
-static void setBright(uint8_t b){ledcWrite(1,b);}
+static void setBright(uint8_t b){ledcWrite(2,b);}   // channel 2 -> LEDC timer 1 (speaker is ch0/timer0; keep them separate)
 static void applyColorOrder(){ tft.writecommand(MADCTL_REG); uint8_t m=MAD_MV; if(colorBGR)m|=MAD_BGR; tft.writedata(m); }
 
 static TFT_eSPI *G=&tft; static int OY=0, bandH=0;
@@ -548,7 +548,7 @@ static void appSaved(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v5.1  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
+  px("v5.2  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
   px("BLE + Wi-Fi recon (sends",160,164,C_MUTED,1,MC_DATUM);
   px("random MAC). Stealth=silent.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
@@ -690,7 +690,7 @@ void setup(){
   tft.invertDisplay(invertOn);        // this panel needs inversion ON for a black background
   applyColorOrder();
   // attach backlight PWM AFTER tft.init() so TFT_eSPI doesn't reclaim the BL pin as a plain output
-  ledcSetup(1,5000,8); ledcAttachPin(TFT_BL,1); setBright(brightness);
+  ledcSetup(2,5000,8); ledcAttachPin(TFT_BL,2); setBright(brightness);   // ch2 = timer1, isolated from speaker beeps on ch0/timer0
   tsSPI.begin(T_CLK,T_MISO,T_MOSI,T_CS); ts.begin(tsSPI); ts.setRotation(1);
   splash();
   spr.setColorDepth(16);
@@ -706,7 +706,7 @@ void setup(){
   bleScan->setActiveScan(!stealth); bleScan->setInterval(160); bleScan->setWindow(80);   // active unless stealth
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 5.1 up");
+  Serial.println("PHANTOM 5.2 up");
 }
 
 void loop(){
