@@ -282,18 +282,23 @@ static void icon(char k,int cx,int cy,uint16_t c){
     case 'G': G->drawCircle(cx,Y(cy),8,c);G->fillCircle(cx,Y(cy),3,c);                      // gear
               for(int i=0;i<8;i++){float a=i*PI/4;G->drawLine(cx+(int)(cosf(a)*8),Y(cy)+(int)(sinf(a)*8),cx+(int)(cosf(a)*12),Y(cy)+(int)(sinf(a)*12),c);} break;
     case 'i': G->drawCircle(cx,Y(cy),11,c); px("i",cx,cy-1,c,2,MC_DATUM); break;            // about
+    case 'H': G->drawCircle(cx,Y(cy),10,c);G->drawCircle(cx,Y(cy),4,c);                      // crosshair (locate)
+              G->drawLine(cx-14,Y(cy),cx-6,Y(cy),c);G->drawLine(cx+6,Y(cy),cx+14,Y(cy),c);
+              G->drawLine(cx,Y(cy-14),cx,Y(cy-6),c);G->drawLine(cx,Y(cy+6),cx,Y(cy+14),c);
+              G->fillCircle(cx,Y(cy),1,c); break;
   }
 }
 
 // ======================================================================
 //  Touch (tap only)
 // ======================================================================
-enum View { V_HOME, V_TRACK, V_SCANNER, V_WIFI, V_BT, V_SET, V_ABOUT, V_SAVED, V_COUNT };
+enum View { V_HOME, V_TRACK, V_SCANNER, V_WIFI, V_BT, V_SET, V_ABOUT, V_SAVED, V_HUNT, V_COUNT };
 static uint8_t view=V_HOME;
 static int pageIdx[V_COUNT]={0};
 static bool pressed=false, moved=false; static int pressX,pressY; static uint32_t pressMs;
 static int tapX=-1, tapY=-1; static bool gDown=false; static int gX=0,gY=0;
 static bool settingsDirty=false;
+static char huntMac[18]={0}; static bool hunting=false; static float huntSm=-100;   // LOCATE target
 
 static bool readTouch(int&sx,int&sy){ if(!ts.touched())return false; TS_Point p=ts.getPoint();
   if(p.z<200)return false;
@@ -312,7 +317,7 @@ static bool tapIn(int x,int y,int w,int h){return tapX>=0&&tapX>=x&&tapX<x+w&&ta
 // ======================================================================
 //  Header, pager, home
 // ======================================================================
-static const char *VNAME[V_COUNT]={"PHANTOM","DEFENSE","SCANNER","WI-FI","BLUETOOTH","SETTINGS","ABOUT","SAVED LOG"};
+static const char *VNAME[V_COUNT]={"PHANTOM","DEFENSE","SCANNER","WI-FI","BLUETOOTH","SETTINGS","ABOUT","SAVED LOG","LOCATE"};
 static void header(bool back){
   G->drawFastHLine(0,Y(26),320,C_PURP2);
   if(back){ px("<",12,13,C_PURP,2,MC_DATUM); px(VNAME[view],34,13,C_TXT,2,ML_DATUM); }
@@ -336,15 +341,16 @@ static int pager(int total,int perPage){
 struct App{const char*name;char icon;View view;};
 static const App APPS[]={
   {"DEFENSE",'D',V_TRACK},{"SCANNER",'S',V_SCANNER},{"WI-FI",'W',V_WIFI},
-  {"BLUETOOTH",'B',V_BT},{"SETTINGS",'G',V_SET},{"ABOUT",'i',V_ABOUT},
+  {"BLUETOOTH",'B',V_BT},{"SETTINGS",'G',V_SET},{"LOCATE",'H',V_HUNT},
 };
-static const char *APP_SUB[6]={"tracker watch","police radar","rogue & deauth","nearby BLE","colour / light","the rite"};
+static const char *APP_SUB[6]={"tracker watch","police radar","rogue & deauth","nearby BLE","colour / light","hunt a signal"};
 static void drawHome(uint32_t now){
   int trail=0,wifi=0,bt=0;
   portENTER_CRITICAL(&mux); int dc=devCount;
   for(int i=0;i<dc;i++){ if(now-dev[i].lastSeen>30000)continue;
     if(dev[i].src=='W')wifi++; else bt++; if(isTrail(dev[i],now))trail++; }
   portEXIT_CRITICAL(&mux);
+  if(tapIn(0,0,120,26)){ view=V_ABOUT; beepTap(); }        // tap PHANTOM header -> about
   const int gx=8, gy=34, cw=152, ch=64, gap=5;    // big buttons, fill the screen
   for(int i=0;i<6;i++){ int col=i%2,row=i/2;
     int x=gx+col*(cw+gap), y=gy+row*(ch+gap);
@@ -464,9 +470,9 @@ static void appBt(uint32_t now){
     G->fillRect(8,Y(y),3,rowH-5,fc);
     px(d.name[0]?d.name:"(no name)",16,y,d.name[0]?C_TXT:C_MUTED,1,TL_DATUM);
     px(d.mac,16,y+11,C_MUTED,1,TL_DATUM);
-    if(d.tracker)px(TRK_NAME[d.tracker],300,y+11,C_PURP,1,TR_DATUM);
-    else if(d.cat<CAT_COUNT)px(CAT_TILE[d.cat],300,y+11,CAT_COL[d.cat],1,TR_DATUM);
-    bars(276,y+1,rssiLvl(d.rssi),fc,5,3,15); }
+    if(d.tracker)px(TRK_NAME[d.tracker],312,y,C_PURP,1,TR_DATUM);          // tag on top line
+    else if(d.cat<CAT_COUNT)px(CAT_TILE[d.cat],312,y,CAT_COL[d.cat],1,TR_DATUM);
+    bars(282,y+13,rssiLvl(d.rssi),fc,5,3,12); }                           // bars on bottom line
 }
 
 // ======================================================================
@@ -542,10 +548,66 @@ static void appSaved(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v4.8  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
+  px("v5.0  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
   px("BLE + Wi-Fi recon (sends",160,164,C_MUTED,1,MC_DATUM);
   px("random MAC). Stealth=silent.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
+}
+
+// ======================================================================
+//  App: Locate  -  pick a signal, then home in on it (Geiger-style)
+// ======================================================================
+static void appHunt(uint32_t now){
+  if(!hunting){
+    static Dev c[MAX_DEV]; int cn=0;
+    portENTER_CRITICAL(&mux);
+    for(int i=0;i<devCount;i++) if(now-dev[i].lastSeen<30000) c[cn++]=dev[i];
+    portEXIT_CRITICAL(&mux);
+    for(int i=0;i<cn;i++)for(int j=i+1;j<cn;j++){ bool bi=c[i].tracker>0,bj=c[j].tracker>0;
+      if((bj&&!bi)||(bj==bi&&c[j].rssi>c[i].rssi)){Dev x=c[i];c[i]=c[j];c[j]=x;} }
+    px("PICK A SIGNAL TO LOCATE",160,36,C_PURP,1,MC_DATUM);
+    if(!cn){ px("nothing nearby yet",160,120,C_MUTED,1,MC_DATUM); return; }
+    const int top=52,rowH=28,perPage=(214-top)/rowH; int start=pager(cn,perPage);
+    for(int k=0;k<perPage;k++){ int i=start+k; if(i>=cn)break; Dev&d=c[i]; int y=top+k*rowH;
+      bool tp=tapIn(8,y,304,rowH-4);
+      uint16_t cc=d.tracker?C_PURP:(d.cat<CAT_COUNT?CAT_COL[d.cat]:C_PURP2);
+      G->fillRoundRect(8,Y(y),304,rowH-4,5,tp?C_PANEL2:C_PANEL); G->fillRect(8,Y(y),3,rowH-4,cc);
+      const char*nm=d.name[0]?d.name:(d.tracker?TRK_NAME[d.tracker]:"(no name)");
+      px(nm,16,y+3,C_TXT,1,TL_DATUM);
+      char sub[34]; snprintf(sub,sizeof(sub),"%c %s %ddBm",d.src,d.mac,d.rssi); px(sub,16,y+14,C_MUTED,1,TL_DATUM);
+      bars(284,y+4,rssiLvl(d.rssi),cc,4,2,14);
+      if(tp){ strlcpy(huntMac,d.mac,sizeof(huntMac)); hunting=true; huntSm=d.rssi; beepTap(); } }
+    return;
+  }
+  // locked on a target
+  Dev tgt; bool found=false; uint32_t age=999999;
+  portENTER_CRITICAL(&mux);
+  for(int i=0;i<devCount;i++) if(!strcmp(dev[i].mac,huntMac)){ tgt=dev[i]; found=true; age=now-dev[i].lastSeen; break; }
+  portEXIT_CRITICAL(&mux);
+  G->fillRoundRect(8,Y(212),304,24,6,C_PANEL); px("< CHANGE TARGET",160,224,C_PURP,1,MC_DATUM);
+  if(tapIn(8,210,304,28)){ hunting=false; beepTap(); return; }
+  if(!found){ px("target not seen",160,120,C_MUTED,1,MC_DATUM); return; }
+  const char*nm=tgt.name[0]?tgt.name:(tgt.tracker?TRK_NAME[tgt.tracker]:"TARGET");
+  px(nm,160,36,C_TXT,2,MC_DATUM);
+  bool live=age<8000;
+  if(live) huntSm=huntSm*0.7f+tgt.rssi*0.3f;
+  int rssi=(int)huntSm, lvl=rssiLvl(rssi);
+  const char*heat; uint16_t hc;
+  if(!live){heat="SIGNAL LOST";hc=C_DIM;}
+  else if(rssi>-55){heat="VERY HOT";hc=C_RED;}
+  else if(rssi>-67){heat="HOT";hc=0xFD40;}
+  else if(rssi>-78){heat="WARM";hc=C_PURP;}
+  else {heat="COLD";hc=C_PURP2;}
+  int cx=160,cy=116;
+  for(int r=1;r<=5;r++){ uint16_t col=(live&&r<=lvl)?hc:C_LINE;
+    G->drawCircle(cx,Y(cy),r*11,col); if(live&&r<=lvl)G->drawCircle(cx,Y(cy),r*11-1,col); }
+  G->fillCircle(cx,Y(cy),5,live?hc:C_DIM);
+  px(heat,cx,182,hc,2,MC_DATUM);
+  float dist=powf(10.0f,(-59.0f-rssi)/(10.0f*2.5f));
+  char sub[28]; if(live){ if(dist<1.0f)snprintf(sub,sizeof(sub),"~%.1f m   %d dBm",dist,rssi);
+    else snprintf(sub,sizeof(sub),"~%d m   %d dBm",(int)(dist+0.5f),rssi); }
+  else snprintf(sub,sizeof(sub),"move around to re-acquire");
+  px(sub,cx,200,C_MUTED,1,MC_DATUM);
 }
 
 // ======================================================================
@@ -556,7 +618,8 @@ static void drawView(uint32_t now){
   else { header(true);
     switch(view){ case V_TRACK:appDefense(now);break; case V_SCANNER:appScanner(now);break;
       case V_WIFI:appWifi(now);break; case V_BT:appBt(now);break;
-      case V_SET:appSettings(now);break; case V_ABOUT:appAbout(now);break; case V_SAVED:appSaved(now);break; }
+      case V_SET:appSettings(now);break; case V_ABOUT:appAbout(now);break; case V_SAVED:appSaved(now);break;
+      case V_HUNT:appHunt(now);break; }
     if(tapIn(0,0,52,28)){ view=(view==V_SAVED)?V_SET:V_HOME; beepTap(); } }
 }
 static void render(uint32_t now){
@@ -643,7 +706,7 @@ void setup(){
   bleScan->setActiveScan(!stealth); bleScan->setInterval(160); bleScan->setWindow(80);   // active unless stealth
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 4.8 up");
+  Serial.println("PHANTOM 5.0 up");
 }
 
 void loop(){
@@ -651,8 +714,9 @@ void loop(){
   uint32_t now=millis();
   handleTouch();
 
-  if(now-chanHop>250){chanHop=now;ch=ch%13+1;esp_wifi_set_channel(ch,WIFI_SECOND_CHAN_NONE);}
-  if(now-lastWin>1000){lastWin=now;deauthWindow=deauthCount;deauthCount=0; autoLog(now);}  // auto-save hits to flash
+  if(now-chanHop>400){chanHop=now;ch=ch%13+1;esp_wifi_set_channel(ch,WIFI_SECOND_CHAN_NONE);}
+  if(now-lastWin>1000){lastWin=now;deauthWindow=deauthCount;deauthCount=0; autoLog(now);
+    setBright(brightness); }   // re-assert backlight so radio activity can't leave it dimmed
   wifiScanStep();
 
   bool follow=false;
@@ -673,7 +737,14 @@ void loop(){
 
   if(settingsDirty&&now-lastSave>400){saveSettings();settingsDirty=false;lastSave=now;}
 
-  bool anim=(view==V_TRACK||view==V_SCANNER);
+  // LOCATE: Geiger-style beeping - faster as the target gets closer
+  static uint32_t lastHuntBeep=0;
+  if(view==V_HUNT&&hunting&&soundOn&&!alerting&&!trkAl){
+    uint32_t iv=constrain((int)map((int)huntSm,-90,-45,1300,110),110,1300);
+    if(now-lastHuntBeep>iv){ lastHuntBeep=now; ledcWriteTone(0,3100); delay(6); ledcWriteTone(0,0); }
+  }
+
+  bool anim=(view==V_TRACK||view==V_SCANNER||view==V_HUNT);
   uint32_t every=bandH?(gDown?33:(anim?70:150)):400;
   if(!lastDraw||now-lastDraw>=every||tapX>=0){lastDraw=now;render(now);}
 
