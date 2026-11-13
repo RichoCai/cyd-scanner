@@ -40,25 +40,51 @@
 // ======================================================================
 //  Emergency-scanner rules
 // ======================================================================
-enum Cat : uint8_t { CAT_POLICE=0, CAT_EMS, CAT_FIRE, CAT_VEHICLE, CAT_COUNT };
+enum Cat : uint8_t { CAT_POLICE=0, CAT_EMS, CAT_FIRE, CAT_VEHICLE, CAT_TRAFFIC, CAT_COUNT };
 enum Src : uint8_t { S_BLE=1, S_WIFI=2, S_ANY=3 };
 enum Kind : uint8_t { BY_MAC, BY_NAME };
 struct Rule { uint8_t src; uint8_t kind; const char *pattern; const char *label; uint8_t cat; };
 static const Rule RULES[] = {
-  {S_ANY,BY_MAC,"00:25:df","Axon device",CAT_POLICE},{S_ANY,BY_NAME,"axon","Axon",CAT_POLICE},
+  // --- POLICE: body cams, radios, units ---
+  {S_ANY,BY_MAC,"00:25:df","Axon device",CAT_POLICE},
+  {S_ANY,BY_NAME,"axon","Axon",CAT_POLICE},{S_ANY,BY_NAME,"taser","TASER/Axon",CAT_POLICE},
+  {S_ANY,BY_NAME,"signal sidearm","Axon Signal",CAT_POLICE},
+  {S_ANY,BY_NAME,"body worn","Body cam",CAT_POLICE},{S_ANY,BY_NAME,"bodyworn","Body cam",CAT_POLICE},
+  {S_ANY,BY_NAME,"body cam","Body cam",CAT_POLICE},{S_ANY,BY_NAME,"bodycam","Body cam",CAT_POLICE},
   {S_BLE,BY_NAME,"body 3","Axon Body 3",CAT_POLICE},{S_BLE,BY_NAME,"body 4","Axon Body 4",CAT_POLICE},
-  {S_ANY,BY_NAME,"fleet 3","Axon Fleet",CAT_POLICE},{S_ANY,BY_NAME,"watchguard","WatchGuard",CAT_POLICE},
-  {S_ANY,BY_NAME,"apx","Motorola APX",CAT_POLICE},{S_ANY,BY_NAME,"police","Police net",CAT_POLICE},
+  {S_ANY,BY_NAME,"fleet 3","Axon Fleet",CAT_POLICE},
+  {S_ANY,BY_NAME,"watchguard","WatchGuard",CAT_POLICE},{S_ANY,BY_NAME,"v300","WatchGuard V300",CAT_POLICE},
+  {S_ANY,BY_NAME,"digital ally","Digital Ally",CAT_POLICE},{S_ANY,BY_NAME,"reveal media","Reveal cam",CAT_POLICE},
+  {S_ANY,BY_NAME,"apx","Motorola APX",CAT_POLICE},{S_ANY,BY_NAME,"mototrbo","Motorola radio",CAT_POLICE},
+  {S_ANY,BY_NAME,"l3harris","L3Harris radio",CAT_POLICE},{S_ANY,BY_NAME,"tait ","Tait radio",CAT_POLICE},
+  {S_ANY,BY_NAME,"police","Police",CAT_POLICE},{S_ANY,BY_NAME,"wapol","WA Police",CAT_POLICE},
+  {S_ANY,BY_NAME,"patrol","Patrol",CAT_POLICE},
+  // --- EMS / ambulance ---
   {S_ANY,BY_NAME,"ambulance","Ambulance",CAT_EMS},{S_ANY,BY_NAME,"paramedic","Paramedic",CAT_EMS},
-  {S_ANY,BY_NAME,"st john","St John",CAT_EMS},{S_ANY,BY_NAME,"lifepak","LIFEPAK",CAT_EMS},
-  {S_ANY,BY_NAME,"zoll","ZOLL",CAT_EMS},{S_ANY,BY_NAME,"dfes","DFES",CAT_FIRE},
+  {S_ANY,BY_NAME,"st john","St John",CAT_EMS},{S_ANY,BY_NAME,"sjwa","St John WA",CAT_EMS},
+  {S_ANY,BY_NAME,"rfds","Flying Doctor",CAT_EMS},{S_ANY,BY_NAME,"lifepak","LIFEPAK",CAT_EMS},
+  {S_ANY,BY_NAME,"zoll","ZOLL",CAT_EMS},{S_ANY,BY_NAME,"corpuls","Corpuls",CAT_EMS},
+  {S_ANY,BY_NAME,"lucas","LUCAS CPR",CAT_EMS},
+  // --- FIRE / SES ---
+  {S_ANY,BY_NAME,"dfes","DFES",CAT_FIRE},{S_ANY,BY_NAME,"fesa","FESA",CAT_FIRE},
   {S_ANY,BY_NAME,"fire rescue","Fire Rescue",CAT_FIRE},{S_ANY,BY_NAME,"fire brigade","Fire brigade",CAT_FIRE},
-  {S_WIFI,BY_NAME,"ses ","SES",CAT_FIRE},{S_WIFI,BY_MAC,"00:30:44","Cradlepoint",CAT_VEHICLE},
-  {S_WIFI,BY_NAME,"cradlepoint","Cradlepoint",CAT_VEHICLE},{S_WIFI,BY_NAME,"airlink","Sierra AirLink",CAT_VEHICLE},
-  {S_WIFI,BY_NAME,"pepwave","Peplink",CAT_VEHICLE},{S_ANY,BY_NAME,"toughbook","Toughbook",CAT_VEHICLE},
-  {S_ANY,BY_NAME,"getac","Getac",CAT_VEHICLE},
+  {S_ANY,BY_NAME,"bushfire","Bushfire",CAT_FIRE},{S_WIFI,BY_NAME,"ses ","SES",CAT_FIRE},
+  // --- VEHICLE: in-car routers / rugged laptops ---
+  {S_WIFI,BY_MAC,"00:30:44","Cradlepoint",CAT_VEHICLE},{S_WIFI,BY_NAME,"cradlepoint","Cradlepoint",CAT_VEHICLE},
+  {S_WIFI,BY_MAC,"00:a0:d5","Sierra AirLink",CAT_VEHICLE},{S_WIFI,BY_NAME,"airlink","Sierra AirLink",CAT_VEHICLE},
+  {S_WIFI,BY_NAME,"mp70","AirLink MP70",CAT_VEHICLE},{S_WIFI,BY_NAME,"pepwave","Peplink",CAT_VEHICLE},
+  {S_WIFI,BY_NAME,"peplink","Peplink",CAT_VEHICLE},{S_ANY,BY_NAME,"toughbook","Toughbook MDT",CAT_VEHICLE},
+  {S_ANY,BY_NAME,"getac","Getac MDT",CAT_VEHICLE},
+  // --- TRAFFIC: speed / red-light / ANPR camera gear (networking only, not the radar beam) ---
+  {S_ANY,BY_NAME,"redflex","Redflex cam",CAT_TRAFFIC},{S_ANY,BY_NAME,"gatso","Gatso cam",CAT_TRAFFIC},
+  {S_ANY,BY_NAME,"jenoptik","Jenoptik cam",CAT_TRAFFIC},{S_ANY,BY_NAME,"vitronic","Vitronic cam",CAT_TRAFFIC},
+  {S_ANY,BY_NAME,"sensys","Sensys cam",CAT_TRAFFIC},{S_ANY,BY_NAME,"acusensor","Acusensor",CAT_TRAFFIC},
+  {S_ANY,BY_NAME,"safe-t-cam","Safe-T-Cam",CAT_TRAFFIC},{S_ANY,BY_NAME,"speed cam","Speed camera",CAT_TRAFFIC},
+  {S_ANY,BY_NAME,"speedcam","Speed camera",CAT_TRAFFIC},{S_ANY,BY_NAME,"mobile speed","Mobile speed",CAT_TRAFFIC},
+  {S_ANY,BY_NAME,"anpr","ANPR camera",CAT_TRAFFIC},{S_ANY,BY_NAME,"red light","Red-light cam",CAT_TRAFFIC},
+  {S_ANY,BY_NAME,"redlight","Red-light cam",CAT_TRAFFIC},
 };
-static const char *CAT_TILE[CAT_COUNT] = {"POL","EMS","FIRE","VEH"};
+static const char *CAT_TILE[CAT_COUNT] = {"POL","EMS","FIRE","VEH","SPD"};
 
 // ======================================================================
 //  Palette  -  pure black + purple
@@ -73,7 +99,7 @@ static const char *CAT_TILE[CAT_COUNT] = {"POL","EMS","FIRE","VEH"};
 #define C_PURP   0xBA7F
 #define C_PURP2  0x6973
 #define C_RED    0xF9A6
-static const uint16_t CAT_COL[CAT_COUNT] = {0xBA7F,0xFFFF,0xF9A6,0xFD40};
+static const uint16_t CAT_COL[CAT_COUNT] = {0xBA7F,0xFFFF,0xF9A6,0xFD40,0x07FF};  // POL EMS FIRE VEH SPD
 
 // ======================================================================
 //  Device table
@@ -167,7 +193,7 @@ static void wifiScanStep(){ static uint32_t st=0; int n=WiFi.scanComplete();
     for(int i=0;i<n;i++) observe('W',WiFi.BSSIDstr(i).c_str(),WiFi.SSID(i).c_str(),WiFi.RSSI(i),
       WiFi.channel(i),WiFi.encryptionType(i)==WIFI_AUTH_OPEN?0:1,0);
     WiFi.scanDelete(); st=0;
-  } else if(n==WIFI_SCAN_FAILED&&millis()-st>5000){ st=millis(); WiFi.scanNetworks(true,true,true,110); }
+  } else if(n==WIFI_SCAN_FAILED&&millis()-st>5000){ st=millis(); WiFi.scanNetworks(true,true,false,120); }  // active scan
 }
 static void IRAM_ATTR promiscCB(void*buf,wifi_promiscuous_pkt_type_t type){
   if(type!=WIFI_PKT_MGMT)return; const wifi_promiscuous_pkt_t*p=(wifi_promiscuous_pkt_t*)buf;
@@ -359,10 +385,10 @@ static void appScanner(uint32_t now){
   for(int i=0;i<devCount;i++) if(dev[i].cat<CAT_COUNT&&now-dev[i].lastSeen<60000)cnt[dev[i].cat]++;
   portEXIT_CRITICAL(&mux);
   radar(160,126,68,now,-1,1);
-  for(int c=0;c<CAT_COUNT;c++){ int x=16+c*78;
-    G->fillCircle(x+4,Y(220),4,CAT_COL[c]);
+  for(int c=0;c<CAT_COUNT;c++){ int x=6+c*62;
+    G->fillCircle(x+3,Y(220),3,CAT_COL[c]);
     char s[12]; snprintf(s,sizeof(s),"%s %d",CAT_TILE[c],cnt[c]);
-    px(s,x+14,216,cnt[c]?C_TXT:C_DIM,1,TL_DATUM); }
+    px(s,x+10,216,cnt[c]?C_TXT:C_DIM,1,TL_DATUM); }
 }
 
 // ======================================================================
@@ -477,9 +503,9 @@ static void appSaved(uint32_t now){
 static void appAbout(uint32_t now){
   drawGhost(160,46,26,22,C_PURP);
   px("PHANTOM",160,112,C_PURP,3,MC_DATUM);
-  px("v4.4  -  RECEIVE ONLY",160,140,C_MUTED,1,MC_DATUM);
-  px("Passive BLE + Wi-Fi recon.",160,164,C_MUTED,1,MC_DATUM);
-  px("No deauth / jam / spam.",160,180,C_MUTED,1,MC_DATUM);
+  px("v4.5  -  ACTIVE SCAN",160,140,C_MUTED,1,MC_DATUM);
+  px("BLE + Wi-Fi recon (sends",160,164,C_MUTED,1,MC_DATUM);
+  px("scan requests). No attacks.",160,180,C_MUTED,1,MC_DATUM);
   px("Counter-surveillance tool.",160,196,C_MUTED,1,MC_DATUM);
 }
 
@@ -571,10 +597,10 @@ void setup(){
   NimBLEDevice::init("");
   bleScan=NimBLEDevice::getScan();
   bleScan->setAdvertisedDeviceCallbacks(new BleCB(),true);
-  bleScan->setActiveScan(false); bleScan->setInterval(160); bleScan->setWindow(80);
+  bleScan->setActiveScan(true); bleScan->setInterval(160); bleScan->setWindow(80);   // active scan: devices reply with their names
   bleScan->setMaxResults(0); bleScan->start(0,nullptr,false);
   delay(900);
-  Serial.println("PHANTOM 4.4 up");
+  Serial.println("PHANTOM 4.5 up");
 }
 
 void loop(){
